@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Collar Lab — CBA.AX</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=Instrument+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐂</text></svg>">
+</head>
+<body>
+  <header class="app">
+    <div class="masthead-nav">
+      <span class="brand">◆ COLLAR LAB</span>
+      <nav class="tabs" id="tabbar"></nav>
+    </div>
+    <div class="globals" id="globals"></div>
+  </header>
+  <main id="main">
+    <header class="masthead">
+      <div class="toolbar">
+        <span class="pill" id="mast-pill"><span class="dot"></span><span class="txt">CBA.AX</span></span>
+      </div>
+      <p class="kicker">OPTIONS DESK COURSEWARE · CBA.AX</p>
+      <h1>The 30× ADV collar</h1>
+      <p class="sub">Equity collars from first principles — payoffs, greeks, the bank's hedge — up to a multi-tranche program too big to trade any other way.</p>
+      <p class="asat">European Black-Scholes + skew · illustrative model, not advice</p>
+    </header>
+  </main>
+  <footer class="app">
+    All prices in A$ per share unless noted. Model: European Black-Scholes with continuous dividend yield and a
+    linear-in-log-moneyness skew; square-root-law market impact; on tab 3 implied vol reacts to the spot path
+    (leverage effect + gap spikes) and bank P&amp;L carries stock-borrow and crossing costs.
+    CBA assumptions: spot adjustable, ADV 2.5M shares. Built as a learning tool — numbers are illustrative, not tradable.
+  </footer>
+
+  <script src="js/state.js"></script>
+  <script src="js/bs.js"></script>
+  <script src="js/paths.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/tabs/foundations.js"></script>
+  <script src="js/tabs/greeks.js"></script>
+  <script src="js/tabs/dealer.js"></script>
+  <script src="js/tabs/size.js"></script>
+  <script src="js/tabs/spreads.js"></script>
+  <script src="js/tabs/campaign.js"></script>
+  <script>
+    (function () {
+      const ORDER = ['foundations', 'greeks', 'dealer', 'size', 'spreads', 'campaign'];
+      const main = document.getElementById('main');
+      const tabbar = document.getElementById('tabbar');
+      const panels = {};
+      let active = location.hash.replace('#', '') || 'foundations';
+      if (!ORDER.includes(active)) active = 'foundations';
+
+      // ---- global header controls ----
+      const globals = document.getElementById('globals');
+      function gItem(label, node) {
+        const d = document.createElement('div');
+        d.className = 'g-item';
+        const s = document.createElement('span');
+        s.innerHTML = label;
+        d.append(s, node);
+        globals.append(d);
+        return d;
+      }
+      function gSlider(label, min, max, step, key, fmt, scale) {
+        const wrap = document.createElement('span');
+        const input = document.createElement('input');
+        input.type = 'range'; input.min = min; input.max = max; input.step = step;
+        input.value = CL.state[key] * (scale || 1);
+        const val = document.createElement('b');
+        val.textContent = fmt(CL.state[key]);
+        input.addEventListener('input', () => {
+          const v = parseFloat(input.value) / (scale || 1);
+          CL.state[key] = v;
+          val.textContent = fmt(v);
+          CL.emit();
+        });
+        wrap.append(input);
+        const d = gItem(label, wrap);
+        d.append(val);
+      }
+      gSlider('Spot', 120, 220, 1, 'spot', (v) => 'A$' + v.toFixed(0), 1);
+      gSlider('ATM vol', 10, 40, 0.5, 'vol', (v) => (v * 100).toFixed(1) + '%', 100);
+      gSlider('Rate', 0, 8, 0.25, 'rate', (v) => (v * 100).toFixed(2) + '%', 100);
+      gSlider('Div yield', 0, 8, 0.25, 'divy', (v) => (v * 100).toFixed(2) + '%', 100);
+
+      // skew toggle
+      const skewBtn = document.createElement('span');
+      const skewSeg = CL.ui.segmented({
+        options: [{ id: 'on', label: 'Skew on' }, { id: 'off', label: 'Flat vol' }],
+        value: CL.state.skewOn ? 'on' : 'off',
+        onChange: (v) => { CL.state.skewOn = v === 'on'; CL.emit(); },
+      });
+      skewBtn.append(skewSeg.root);
+      gItem('', skewBtn);
+
+      // perspective toggle
+      const perspSeg = CL.ui.segmented({
+        options: [{ id: 'client', label: 'Holder view' }, { id: 'dealer', label: 'Bank view' }],
+        value: CL.state.perspective,
+        onChange: (v) => { CL.state.perspective = v; CL.emit(); },
+      });
+      const pw = document.createElement('span');
+      pw.append(perspSeg.root);
+      gItem('', pw);
+
+      // ---- masthead pill mirrors the working assumptions ----
+      const pillTxt = document.querySelector('#mast-pill .txt');
+      function updatePill() {
+        pillTxt.textContent = 'CBA.AX A$' + CL.state.spot.toFixed(0) +
+          ' · σ ' + (CL.state.vol * 100).toFixed(1) + '% · ' +
+          (CL.state.skewOn ? 'skew' : 'flat vol');
+      }
+      updatePill();
+
+      // ---- tabs ----
+      for (const id of ORDER) {
+        const tab = CL.tabs[id];
+        const btn = document.createElement('button');
+        btn.innerHTML = '<span class="n">' + (ORDER.indexOf(id) + 1) + '</span>' + tab.title;
+        btn.addEventListener('click', () => activate(id));
+        btn.dataset.tab = id;
+        tabbar.append(btn);
+        const panel = document.createElement('section');
+        panel.className = 'tab-panel';
+        panel.id = 'panel-' + id;
+        main.append(panel);
+        panels[id] = { btn, panel, rendered: false };
+      }
+
+      function render(id) {
+        CL.tabs[id].render(panels[id].panel);
+        panels[id].rendered = true;
+      }
+      function activate(id) {
+        active = id;
+        location.hash = id;
+        for (const k of ORDER) {
+          panels[k].btn.classList.toggle('active', k === id);
+          panels[k].panel.classList.toggle('active', k === id);
+        }
+        render(id);   // always fresh — cheap enough, guarantees current state
+        window.scrollTo({ top: 0 });
+      }
+
+      CL.onChange(() => { updatePill(); render(active); });
+      window.addEventListener('hashchange', () => {
+        const id = location.hash.replace('#', '');
+        if (ORDER.includes(id) && id !== active) activate(id);
+      });
+      activate(active);
+    })();
+  </script>
+</body>
+</html>
