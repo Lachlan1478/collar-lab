@@ -7,7 +7,7 @@ CL.tabs.size = {
   id: 'size',
   title: 'Size & Impact',
   render(root) {
-    const { el, slider, tiles, callout, card } = CL.ui;
+    const { el, slider, select, tiles, callout, card } = CL.ui;
     const F = CL.fmt;
     root.innerHTML = '';
 
@@ -39,8 +39,18 @@ CL.tabs.size = {
     }).root);
     root.append(controls);
 
+    root.append(callout('', 'How to read this tab — five steps, in order',
+      '<b>Step 1 · the clock:</b> how many days of selling is the hedge? ' +
+      '<b>Step 2 · the bill:</b> what does forcing it through the order book cost? ' +
+      '<b>Step 3 · the map:</b> where does the program\'s gamma pile up? ' +
+      '<b>Step 4 · the chase:</b> what naked delta is the trader carrying while the hedge is still being worked? ' +
+      '<b>Step 5 · the theatre:</b> watch the whole thing play out on the tape. ' +
+      'Every number recomputes from the four sliders above — push them to extremes and re-read the chain.'));
+
     const tileHost = el('div');
     root.append(tileHost);
+    const chainHost = el('div');
+    root.append(chainHost);
 
     root.append(callout('warn', 'The execution problem',
       'A bank can realistically work ~10–20% of volume before their own selling <i>is</i> the tape. ' +
@@ -48,23 +58,62 @@ CL.tabs.size = {
       'and the client\'s strikes get set against a spot the trade itself pushed down. ' +
       'Slower is cheaper — but slower means longer unhedged, and the client wears the market risk in the meantime.'));
 
+    root.append(el('h3', null, 'Step 1 — the clock'));
+    root.append(el('p', null,
+      'The tile chain compresses to one question: <b>can each tranche\'s selling finish before the next tranche lands?</b> ' +
+      'Terracotta bars mean no — flows stack, and the desk ends up trading faster than its participation target without choosing to.'));
     const execCard = card('Executing the inception hedge',
       'Days of selling required per tranche at the chosen participation rate.');
     root.append(execCard);
 
-    const g2 = el('div', 'grid2');
+    root.append(el('h3', null, 'Step 2 — the bill'));
+    root.append(el('p', null,
+      'Forcing Q shares through a book that refills at ADV pace costs roughly σ<sub>daily</sub>·√(Q/ADV) per share — ' +
+      'the square-root law. Size is given, vol is given: the only lever the desk controls is <b>how many separate, ' +
+      'well-spaced orders</b> the program is cut into.'));
     const impactCard = card('Impact cost: one-shot vs tranches',
       'Square-root market-impact model. Well-separated tranches let liquidity refill: total cost falls like 1/√N.');
+    root.append(impactCard);
+
+    root.append(el('h3', null, 'Step 3 — the map of risk'));
+    root.append(el('p', null,
+      'Impact is paid once; gamma is carried for a year. This chart is the most important picture at size: ' +
+      'how many shares the street must trade for a 1% CBA move, at every price level. One strike-set builds a cliff ' +
+      'the whole market can see; a ladder of tranches builds a hill it can absorb.'));
     const gammaCard = card('Aggregate bank gamma: one strike vs a ladder',
       'Shares the street must trade per 1% CBA move, across spot. One tranche = a cliff at a single strike pair. Averaging in spreads it.');
-    g2.append(impactCard, gammaCard);
-    root.append(g2);
+    root.append(gammaCard);
+
+    // ---- Step 4: the trader's delta while the hedge is worked ----
+    root.append(el('h3', null, 'Step 4 — the chase: the trader\'s delta while the hedge is worked'));
+    root.append(el('p', null,
+      'Steps 1–3 assume the market politely stands still while the desk sells. It does not. From the second the strikes ' +
+      'print, the book\'s delta is <b>live</b> — and it moves with spot every day — but the trader can only trade the ' +
+      'participation cap. Below: the hedge the book <b>needs</b> (terracotta, recomputed daily off the path) vs the hedge the ' +
+      'trader actually <b>has</b> (navy, built at the cap). The vertical gap is naked delta — pure market risk the desk never wanted, ' +
+      'and the reason "slower is cheaper" has a limit.'));
+    let hedgeScen = 'crash';
+    const chaseCtl = el('div', 'controls');
+    chaseCtl.append(select({
+      label: 'Path while hedging', options: CL.pathScenarios, value: hedgeScen,
+      onChange: (v) => { hedgeScen = v; draw(); },
+    }).root);
+    root.append(chaseCtl);
+    const chaseTiles = el('div');
+    root.append(chaseTiles);
+    const g2c = el('div', 'grid2');
+    const chaseCard = card('Needed vs held', 'The chase: the target moves with spot; the trader closes the gap at the participation cap.');
+    const slipCard = card('What the gap cost', 'Cumulative P&L from carrying naked delta while working the hedge. Sign is luck; size is the lesson.');
+    g2c.append(chaseCard, slipCard);
+    root.append(g2c);
+    const chaseNote = el('div');
+    root.append(chaseNote);
 
     // ---- Scenario theatre ------------------------------------------------
     root.append(el('h3', null, 'Scenario theatre'));
     root.append(el('p', null,
-      'The charts above are the arithmetic; this is the clock. Watch the same 30× program executed three ways — ' +
-      'one heroic order, six clean tranches, and six tranches that stack.'));
+      'Step 5 — watch it happen. The charts above are the arithmetic; this is the clock. Watch the same 30× program ' +
+      'executed three ways — one heroic order, six clean tranches, and six tranches that stack.'));
     const picker = el('div', 'scenario-picker');
     const theatreHost = el('div');
     root.append(picker, theatreHost);
@@ -432,6 +481,15 @@ CL.tabs.size = {
         { k: 'Per tranche (' + nTranches + ')', v: Math.ceil(perTrancheDays) + ' days', d: 'fits inside ' + spacingW + 'w spacing: ' + (perTrancheDays <= spacingW * 5 ? 'yes ✓' : 'NO — overlapping flow') + ' · program spans ~' + Math.ceil((spacingW * 5 * (nTranches - 1) + perTrancheDays) / 5) + 'w' },
       ]));
 
+      // the tile chain, spelled out in words
+      chainHost.innerHTML = '';
+      chainHost.append(el('p', 'small',
+        'In words: ' + F.shares(progShares) + ' collar shares × ' + dDelta.toFixed(2) + ' bank delta per share = <b>' +
+        F.shares(hedgeShares) + ' shares to sell</b>. Divide by ' + F.shares(p.adv) + ' ADV → ' + advDays100.toFixed(1) +
+        ' days of ALL the volume. Divide by ' + (partRate * 100).toFixed(0) + '% participation → <b>' + Math.ceil(advDaysPart) +
+        ' trading days of quiet selling</b>. Divide by ' + nTranches + ' tranche' + (nTranches > 1 ? 's' : '') + ' → ' +
+        Math.ceil(perTrancheDays) + ' days each, against a ' + spacingW * 5 + '-day spacing window.'));
+
       // ---- execution bar chart: days per tranche vs spacing budget ----
       execCard.querySelectorAll('.chart-box, .caption').forEach((n) => n.remove());
       const labels = [], vals = [];
@@ -519,6 +577,73 @@ CL.tabs.size = {
         'Worst single-level hedge demand: one-shot ' + F.shares(peakOne) + ' sh per 1% move → laddered ' + F.shares(peakLad) +
         ' sh (−' + ((1 - peakLad / peakOne) * 100).toFixed(0) + '%). Strikes here are laddered up a rising tape over ' +
         (spacing * (nTranches - 1)) + ' days; wider spacing or a trendier tape disperses them further.'));
+
+      // ---- Step 4: the chase — needed vs held delta on a live path ----
+      const capSh = p.adv * partRate;
+      const chaseDays = Math.min(252, Math.ceil(Math.abs(hedgeShares) / capSh) + 40);
+      const cPath = CL.paths.scripted(hedgeScen, S0, chaseDays, { seed: 11, target: Kc0 });
+      const cIv = CL.paths.volPath(cPath, p.vol);
+      const cx = [], tgt = [], act = [], slipArr = [];
+      let H = 0, slip = 0, prevBook = dDelta * progShares, prevH = 0;
+      let peakResid = 0, peakResidDay = 0, flatDay = null;
+      for (let t = 0; t <= chaseDays; t++) {
+        const T = Math.max(0.02, T0 - t / 252);
+        const pv = Object.assign({}, p, { vol: cIv[t] });
+        const bookSh = CL.structGreeks(bankLegs0, 0, cPath[t], T, pv).delta * progShares;  // + = long-equivalent
+        if (t > 0) slip += (prevBook + prevH) * (cPath[t] - cPath[t - 1]);   // naked delta × the day's move
+        const target = -bookSh;
+        H += Math.max(-capSh, Math.min(capSh, target - H));
+        const resid = bookSh + H;
+        if (Math.abs(resid) > peakResid) { peakResid = Math.abs(resid); peakResidDay = t; }
+        if (flatDay == null && Math.abs(resid) < 0.02 * Math.abs(hedgeShares)) flatDay = t;
+        prevBook = bookSh; prevH = H;
+        cx.push(t); tgt.push(target); act.push(H); slipArr.push(slip);
+      }
+
+      chaseTiles.innerHTML = '';
+      chaseTiles.append(tiles([
+        { k: 'Peak naked delta', v: F.shares(peakResid) + ' sh', d: '≈ ' + F.big(peakResid * S0 * 0.01) + ' P&L per 1% move · day ' + peakResidDay },
+        { k: 'Days to effectively flat', v: flatDay == null ? '>' + chaseDays : '' + flatDay, d: 'residual < 2% of the order' },
+        { k: 'Slippage on this path', v: F.big(slipArr[chaseDays]), cls: slipArr[chaseDays] >= 0 ? 'pos' : 'neg', d: 'sign is luck — the size is the risk' },
+        { k: 'Daily capacity', v: F.shares(capSh) + ' sh', d: (partRate * 100).toFixed(0) + '% of ' + F.shares(p.adv) + ' ADV' },
+      ]));
+
+      chaseCard.querySelectorAll('.chart-box, .caption').forEach((n) => n.remove());
+      CL.charts.lineChart(chaseCard, {
+        height: 260,
+        series: [
+          { name: 'hedge NEEDED (moves with spot)', color: 'var(--s2)', x: cx, y: tgt, width: 2 },
+          { name: 'hedge HELD (built at the cap)', color: 'var(--s1)', x: cx, y: act, width: 2.5 },
+        ],
+        xLabel: 'day', yLabel: 'shares (short)',
+        xFmt: (v) => v.toFixed(0), yFmt: (v) => F.shares(v),
+      });
+      chaseCard.append(el('p', 'caption',
+        'Read the vertical gap: that many shares of CBA exposure are simply UNHEDGED that day. The navy line is a straight ramp ' +
+        '— the cap is the cap — while the terracotta target breathes with every move in spot and vol. Notice the target keeps ' +
+        'moving even after the lines meet: that steady wiggle is ordinary re-hedging, the gamma flows of Step 3.'));
+
+      slipCard.querySelectorAll('.chart-box, .caption').forEach((n) => n.remove());
+      CL.charts.lineChart(slipCard, {
+        height: 260,
+        series: [{ name: 'cumulative naked-delta P&L', color: slipArr[chaseDays] >= 0 ? 'var(--s3)' : 'var(--s2)', x: cx, y: slipArr, width: 2.4, area: true }],
+        xLabel: 'day', yLabel: 'A$',
+        xFmt: (v) => v.toFixed(0), yFmt: (v) => F.big(v),
+        legend: false,
+      });
+      slipCard.append(el('p', 'caption',
+        'Each day: naked delta × the day\'s move, accumulated. On an up-tape the bank\'s unsold long-equivalent delta happens to ' +
+        'WIN — do not confuse that with skill. On a down-tape the same gap bleeds, and in a crash it haemorrhages precisely when ' +
+        'the target is running AWAY (the put goes in the money, the book\'s delta grows, and the desk must sell even more into the hole). ' +
+        'This chart, more than impact, is why desks pre-hedge, why they pay for speed, and why tranche strikes are set tranche by tranche.'));
+
+      chaseNote.innerHTML = '';
+      chaseNote.append(callout('trader', 'What the trader actually does about it',
+        'Nobody runs the full chase naked. Desks <b>pre-hedge</b> a slice before the strikes print (and disclose it), ' +
+        '<b>set strikes tranche by tranche</b> so each chase is 1/N the size (chip 2 in the theatre below), ' +
+        '<b>borrow speed</b> — pay the impact bill for a faster ramp when the gap is scariest — and <b>use futures or swaps</b> ' +
+        'for the first days\' delta while the stock order works. Every one of those is a trade-off between Step 2\'s bill and Step 4\'s risk: ' +
+        'that tension IS the execution business.'));
     }
 
     draw();
