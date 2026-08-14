@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Collar Pricer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=Instrument+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧮</text></svg>">
+  <style>
+    table.legs { border-collapse: collapse; width: 100%; font-size: 12.5px; margin: 10px 0; }
+    table.legs th {
+      font-family: var(--font-display); font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.05em; font-size: 10px; color: var(--ink-2);
+      border-bottom: 1px solid var(--baseline); padding: 6px 6px; text-align: left; white-space: nowrap;
+    }
+    table.legs td { padding: 5px 6px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+    table.legs input, table.legs select {
+      font-family: var(--font-mono); font-size: 12px; color: var(--ink);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+      padding: 5px 7px; width: 100%; min-width: 74px;
+    }
+    table.legs input[type=number] { min-width: 88px; }
+    table.legs input:focus, table.legs select:focus { outline: 2px solid var(--dawn-deep); outline-offset: -1px; }
+    table.legs td.calc { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+    table.legs td.calc.pos { color: var(--good-text); }
+    table.legs td.calc.neg { color: var(--critical); }
+    table.legs button.x { appearance: none; border: none; background: none; color: var(--critical); font-size: 15px; cursor: pointer; padding: 0 4px; }
+    .legs-wrap { overflow-x: auto; }
+    .mkt-inputs { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end; }
+    .mkt-inputs .field label {
+      display: block; font-family: var(--font-display); font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); margin-bottom: 4px;
+    }
+    .mkt-inputs .field input {
+      font-family: var(--font-mono); font-size: 13px; color: var(--ink);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+      padding: 7px 9px; width: 130px;
+    }
+    .mkt-inputs .field input:focus { outline: 2px solid var(--dawn-deep); outline-offset: -1px; }
+    .fetch-err { color: var(--critical); font-size: 12.5px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <header class="app">
+    <div class="masthead-nav">
+      <span class="brand">◆ COLLAR LAB · PRICER</span>
+      <nav class="tabs"><button onclick="location.href='/index.html'">← back to the course</button></nav>
+    </div>
+  </header>
+  <main id="main">
+    <header class="masthead">
+      <p class="kicker">STRUCTURING DESK · FUNDED COLLAR PRICER</p>
+      <h1>Collar Pricer</h1>
+      <p class="sub">Fetch the market as of a date, build the structure leg by leg, and read off the financing: notional, lending against the floor, tenor and PV.</p>
+      <p class="asat">European Black-Scholes on 90-day realised vol (flat, no smile) · Asian legs via averaging-vol approximation · illustrative, not a trading system</p>
+    </header>
+    <div class="wrap" id="app"></div>
+  </main>
+  <footer class="app">
+    Market data: Yahoo Finance daily bars via the local server (/api/hist) — spot is the close on the last trading day on or
+    before the start date; ADV and SD are computed over the 90 trading days ending that day, SD annualised (√252).
+    Lending is sized against the put legs: amount = Σ strike × options, discounted per leg at the funding rate.
+  </footer>
+  <script src="../js/state.js"></script>
+  <script src="../js/bs.js"></script>
+  <script src="../js/ui.js"></script>
+  <script src="pricer.js"></script>
+</body>
+</html>
