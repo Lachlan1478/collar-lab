@@ -54,7 +54,13 @@
     const prem = leg.cp === 'C'
       ? S * eq * Nd1 - K * er * Nd2
       : K * er * Nmd2 - S * eq * Nmd1;
-    return { T, S, K, r, q, sig, tau, sq, d1, d2, eq, er, Nd1, Nd2, Nmd1, Nmd2, prem };
+    // greeks (values from the shared engine so pricer and course agree),
+    // plus the intermediates the traces print
+    const g = CL.bs(leg.cp === 'C' ? 'call' : 'put', S, K, T, sig, r, q);
+    const pdf1 = Math.exp(-0.5 * d1 * d1) / Math.sqrt(2 * Math.PI);
+    const rho = (leg.cp === 'C' ? K * T * er * Nd2 : -K * T * er * Nmd2) / 100;  // per 1% rate move
+    return { T, S, K, r, q, sig, tau, sq, d1, d2, eq, er, Nd1, Nd2, Nmd1, Nmd2, prem,
+      pdf1, delta: g.delta, gamma: g.gamma, vega: g.vega, theta: g.theta, rho };
   }
   const legName = (leg, i) => 'Leg ' + (i + 1) + ' — bank ' + (leg.dir === 'sell' ? 'sells' : 'buys') + ' ' +
     nfmt(leg.n) + ' × ' + (leg.cp === 'P' ? 'put' : 'call') + ' K ' + money(leg.strike) +
@@ -375,6 +381,46 @@
       },
     };
 
+    // ---- bank-book net greeks (sell = bank SHORT the option → −greek) ----
+    const r4b = (v, dp) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(dp == null ? 4 : dp);
+    const shSigned = (v) => (v >= 0 ? '+' : '−') + CL.fmt.shares(Math.abs(v)) + ' sh';
+    const aSigned = (v) => (v >= 0 ? '+' : '−') + big(Math.abs(v));
+    const gAgg = { delta: 0, gammaPct: 0, vega: 0, theta: 0, rho: 0 };
+    for (const { leg, c, sign } of legRows) {
+      const gs = -sign;                       // premium sign flips for risk: sold option = short greeks
+      gAgg.delta += gs * c.delta * leg.n;
+      gAgg.gammaPct += gs * c.gamma * leg.n * mkt.spot * 0.01;
+      gAgg.vega += gs * c.vega * leg.n;
+      gAgg.theta += gs * c.theta * leg.n;
+      gAgg.rho += gs * c.rho * leg.n;
+    }
+    const gTrace = (titleKey, note, perLeg, totalStr) => ({
+      title: titleKey + ' — trace',
+      note: note + ' Sign convention: the bank SELLS a leg ⇒ it is short that option ⇒ its greeks enter with a minus.',
+      sections: [
+        { rows: legRows.map(({ leg, i, c, sign }) => { const out = perLeg(c, leg, -sign); return [legName(leg, i), out[0], out[1]]; }) },
+        { rows: [['Sum across legs', '', totalStr]] },
+      ],
+      result: [titleKey + ' (bank book)', totalStr],
+    });
+    Object.assign(traces, {
+      gdelta: gTrace('Net delta', 'Shares-equivalent exposure of the option book. The desk trades the opposite to run flat.',
+        (c, leg, gs) => ['δ = e^(−qT)·' + (leg.cp === 'C' ? 'N(d₁)' : '(N(d₁)−1)') + ' = ' + c.eq.toFixed(4) + '×' + (leg.cp === 'C' ? c.Nd1.toFixed(4) : '(' + c.Nd1.toFixed(4) + '−1)') + ' = ' + r4b(c.delta) + ' · ' + (gs > 0 ? 'long' : 'short') + ' × ' + nfmt(leg.n), shSigned(gs * c.delta * leg.n)],
+        shSigned(gAgg.delta) + '  →  hedge: ' + (gAgg.delta >= 0 ? 'sell' : 'buy') + ' ' + CL.fmt.shares(Math.abs(gAgg.delta)) + ' sh'),
+      ggamma: gTrace('Net gamma (per 1% move)', 'How many shares of delta the book picks up when ' + mkt.symbol + ' moves 1%.',
+        (c, leg, gs) => ['Γ = e^(−qT)·φ(d₁)/(S·σ√T) = ' + c.eq.toFixed(4) + '×' + c.pdf1.toFixed(4) + '/(' + c.S.toFixed(2) + '×' + c.sq.toFixed(4) + ') = ' + c.gamma.toFixed(6) + '/A$ · ×n×S×1%', shSigned(gs * c.gamma * leg.n * mkt.spot * 0.01)],
+        shSigned(gAgg.gammaPct) + ' per 1% move'),
+      gvega: gTrace('Net vega', 'A$ P&L per 1 vol-point move in the pricing vol.',
+        (c, leg, gs) => ['ν = S·e^(−qT)·φ(d₁)·√T ÷ 100 = ' + (c.S * c.eq * c.pdf1 * Math.sqrt(c.T) / 100).toFixed(4) + '/sh · ' + (gs > 0 ? '+' : '−') + ' × ' + nfmt(leg.n), aSigned(gs * c.vega * leg.n) + '/vol pt'],
+        aSigned(gAgg.vega) + ' per vol pt'),
+      gtheta: gTrace('Net theta', 'A$ decay per calendar day; positive = the book collects rent.',
+        (c, leg, gs) => ['θ/day = [−S·e^(−qT)·φ(d₁)·σ/(2√T) ' + (leg.cp === 'C' ? '− r·K·e^(−rT)·N(d₂) + q·S·e^(−qT)·N(d₁)' : '+ r·K·e^(−rT)·N(−d₂) − q·S·e^(−qT)·N(−d₁)') + '] ÷ 365 = ' + r4b(c.theta) + '/sh', aSigned(gs * c.theta * leg.n) + '/day'],
+        aSigned(gAgg.theta) + ' per day'),
+      grho: gTrace('Net rho', 'A$ P&L per 1% parallel move in the funding rate (option legs only — the loan itself is traced under PV of lending).',
+        (c, leg, gs) => ['ρ = ' + (leg.cp === 'C' ? 'K·T·e^(−rT)·N(d₂)' : '−K·T·e^(−rT)·N(−d₂)') + ' ÷ 100 = ' + r4b(c.rho) + '/sh per 1%', aSigned(gs * c.rho * leg.n)],
+        aSigned(gAgg.rho) + ' per 1% rates'),
+    });
+
     // ---- output tiles (clickable) ----
     const tileDefs = [
       { key: 'notional', k: 'Collar notional', v: big(notional), d: CL.fmt.shares(collaredShares) + ' sh × spot · ' + (mkt.adv90 ? (collaredShares / mkt.adv90).toFixed(1) + '× ADV' : '') },
@@ -384,20 +430,32 @@
       { key: 'pv', k: 'PV of lending', v: big(pvLend), d: 'e^(−rT) per leg · haircut ' + big(lendAmt - pvLend) },
       { key: 'netprem', k: 'Net premium (bank)', v: (netBank >= 0 ? '+' : '−') + big(Math.abs(netBank)), cls: netBank >= 0 ? 'pos' : 'neg', d: netBank >= 0 ? 'bank collects' : 'bank pays' },
     ];
-    const row = el('div', 'tiles');
-    for (const td of tileDefs) {
-      const tile = el('div', 'tile clickable');
-      tile.dataset.key = td.key;
-      tile.append(el('div', 'k', td.k));
-      tile.append(el('div', 'v' + (td.cls ? ' ' + td.cls : ''), td.v));
-      tile.append(el('div', 'd', td.d + ' · <u>trace ⌕</u>'));
-      tile.addEventListener('click', () => {
-        activeTrace = activeTrace === td.key ? null : td.key;
-        recompute();
-      });
-      row.append(tile);
-    }
-    outTiles.append(row);
+    const greekDefs = [
+      { key: 'gdelta', k: 'Net delta', v: shSigned(gAgg.delta), d: 'hedge: ' + (gAgg.delta >= 0 ? 'sell' : 'buy') + ' ' + CL.fmt.shares(Math.abs(gAgg.delta)) + ' sh' },
+      { key: 'ggamma', k: 'Net gamma / 1%', v: shSigned(gAgg.gammaPct), d: 'delta picked up per 1% move' },
+      { key: 'gvega', k: 'Net vega', v: aSigned(gAgg.vega), cls: gAgg.vega >= 0 ? 'pos' : 'neg', d: 'per vol pt' },
+      { key: 'gtheta', k: 'Net theta', v: aSigned(gAgg.theta), cls: gAgg.theta >= 0 ? 'pos' : 'neg', d: 'per day' },
+      { key: 'grho', k: 'Net rho', v: aSigned(gAgg.rho), cls: gAgg.rho >= 0 ? 'pos' : 'neg', d: 'per 1% rates (options only)' },
+    ];
+    const buildRow = (defs) => {
+      const row = el('div', 'tiles');
+      for (const td of defs) {
+        const tile = el('div', 'tile clickable');
+        tile.dataset.key = td.key;
+        tile.append(el('div', 'k', td.k));
+        tile.append(el('div', 'v' + (td.cls ? ' ' + td.cls : ''), td.v));
+        tile.append(el('div', 'd', td.d + ' · <u>trace ⌕</u>'));
+        tile.addEventListener('click', () => {
+          activeTrace = activeTrace === td.key ? null : td.key;
+          recompute();
+        });
+        row.append(tile);
+      }
+      return row;
+    };
+    outTiles.append(buildRow(tileDefs));
+    outTiles.append(el('p', 'trace-sec', 'Greeks — bank book, per the blotter directions, at inception'));
+    outTiles.append(buildRow(greekDefs));
     renderTrace(activeTrace, traces);
   }
 
