@@ -86,6 +86,16 @@ CL.tabs.dealer = {
       'A collar is not set-and-forget: the client will call. These are the desk\'s quotes at any day of THIS path, marked off that day\'s spot and vol — and the CBA the desk must cross the moment the client trades. Restrikes are flow events.');
     root.append(restrikeCard);
 
+    root.append(callout('trader', 'Dividends — the real-world wrinkle',
+      'CBA pays two large franked dividends a year (~A$2.40 each half). This model carries them as a continuous 4.5% yield ' +
+      'inside the forward — how an OTC bank prices a European collar, and one reason big programs are documented European. ' +
+      'On <b>listed American options</b> the story is sharper: the counterparty holding the collar\'s short call can exercise ' +
+      '<b>the night before ex-div</b> to capture the dividend. The desk rule: assignment happens when the dividend exceeds the ' +
+      'call\'s remaining time value. The card below draws that line.'));
+    const divCard = card('Early-exercise radar — when the short call gets called away',
+      'Call time value across spot at the ex-div moment vs the dividend. Wherever time value sits BELOW the dividend line, rational holders exercise — the collar\'s short call becomes a stock sale the night before ex-div.');
+    root.append(divCard);
+
     // ---- Scenario theatre ------------------------------------------------
     root.append(el('h3', null, 'Scenario theatre'));
     root.append(el('p', null,
@@ -593,6 +603,68 @@ CL.tabs.dealer = {
           'Scale it 75× for the full program and a client restrike IS a market event — tab 4\'s territory.</p>');
       };
       renderQuotes();
+
+      // ---- early-exercise radar: dividend vs call time value ----
+      divCard.querySelectorAll('.chart-box, .ctl, .tiles, .caption').forEach((n) => n.remove());
+      let divAmt = 2.40, exMonths = 3;
+      const divCtl = el('div');
+      divCtl.style.display = 'flex'; divCtl.style.gap = '22px'; divCtl.style.flexWrap = 'wrap';
+      const sDiv = slider({
+        label: 'Dividend', min: 0.5, max: 4.0, step: 0.1, value: divAmt,
+        fmt: (v) => 'A$' + v.toFixed(2), onInput: (v) => { divAmt = v; renderDiv(); },
+      });
+      const sExT = slider({
+        label: 'Life left at ex-div', min: 1, max: 12, step: 1, value: exMonths,
+        fmt: (v) => v + 'm', onInput: (v) => { exMonths = v; renderDiv(); },
+      });
+      sDiv.root.style.maxWidth = '220px'; sExT.root.style.maxWidth = '220px';
+      divCtl.append(sDiv.root, sExT.root);
+      divCard.append(divCtl);
+      const divChartHost = el('div');
+      const divTileHost = el('div');
+      const divNoteHost = el('div');
+      divCard.append(divTileHost, divChartHost, divNoteHost);
+      const renderDiv = () => {
+        const Tx = exMonths / 12;
+        const xs2 = [], tv = [];
+        for (let x = S0 * 0.95; x <= S0 * 1.35; x += S0 * 0.004) {
+          const g = CL.legGreeks({ type: 'call', K: Kc, qty: 1 }, x, Tx, p);
+          xs2.push(x);
+          tv.push(g.price - Math.max(x - Kc, 0));
+        }
+        // first spot (above the strike) where time value drops through the dividend
+        let trigger = null;
+        for (let i = 0; i < xs2.length; i++) {
+          if (xs2[i] > Kc && tv[i] < divAmt) { trigger = xs2[i]; break; }
+        }
+        divTileHost.innerHTML = '';
+        divTileHost.append(tiles([
+          { k: 'Assignment trigger', v: trigger ? F.money(trigger) : 'none in range', cls: trigger ? 'neg' : 'pos', d: trigger ? (trigger / S0 * 100).toFixed(1) + '% of spot — above this, expect the call exercised pre-ex-div' : 'time value beats the dividend everywhere shown' },
+          { k: 'Dividend', v: F.money(divAmt), d: 'CBA pays ~A$2.40 each half, fully franked' },
+          { k: 'Cap (short call)', v: F.money(Kc), d: 'time value shrinks as spot runs through it' },
+        ]));
+        divChartHost.querySelectorAll('.chart-box').forEach((n) => n.remove());
+        CL.charts.lineChart(divChartHost, {
+          height: 250,
+          series: [{ name: 'call time value at ex-div', color: 'var(--s1)', x: xs2, y: tv, width: 2.5, area: true }],
+          xLabel: 'spot at ex-div (A$)', yLabel: 'A$/share',
+          xFmt: (v) => v.toFixed(0), yFmt: (v) => v.toFixed(1),
+          refY: [{ v: divAmt, label: 'dividend ' + F.money(divAmt), color: 'var(--critical)' }],
+          refX: [
+            { v: Kc, label: 'cap ' + Kc.toFixed(0), color: 'var(--s3)' },
+            ...(trigger ? [{ v: trigger, label: 'assignment zone →', color: 'var(--critical)' }] : []),
+          ],
+          legend: false,
+        });
+        divNoteHost.innerHTML = '';
+        divNoteHost.append(el('p', 'caption',
+          'The desk scan, the week before every ex-div: for each short-call line, is time value < dividend? ' +
+          (trigger
+            ? 'Here, anywhere above ' + F.money(trigger) + ' the answer is yes — the holder\'s trader does the same maths and exercises. What the desk does about it: buy the call back, roll it up-and-out, or accept delivering stock and losing the franked dividend. '
+            : 'At ' + exMonths + 'm of life the time value beats a ' + F.money(divAmt) + ' dividend at every spot shown — assignment risk is dormant until closer to expiry. ')
+          + 'Shorten "life left" and watch the safe zone collapse: deep-ITM calls with weeks to run and a fat dividend are near-certain assignments — the exact scenario the old expiry commentary warned about, now with the line drawn.'));
+      };
+      renderDiv();
     }
 
     draw();
