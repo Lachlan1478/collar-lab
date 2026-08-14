@@ -50,10 +50,14 @@ CL.tabs.campaign = {
       label: 'Walkthrough scenario', options: CL.pathScenarios, value: scen,
       onChange: (v) => { scen = v; draw(); },
     }).root);
-    let deductImpact = false, seedOff = 0;
+    let deductImpact = false, seedOff = 0, volReact = true;
     controls.append(CL.ui.checkbox({
       label: 'Deduct estimated impact costs in the Monte Carlo', checked: false,
       onChange: (v) => { deductImpact = v; draw(); },
+    }).root);
+    controls.append(CL.ui.checkbox({
+      label: 'Price tranche strikes at path vol (post-crash protection is dear)', checked: true,
+      onChange: (v) => { volReact = v; draw(); },
     }).root);
     const reseedBtn = el('button', 'btn ghost', 'Re-run — new seed');
     reseedBtn.addEventListener('click', () => { seedOff += 1; draw(); });
@@ -348,22 +352,25 @@ CL.tabs.campaign = {
       for (let i = 0; i < nTranches; i++) starts.push(i * spacing);
       const horizon = starts[nTranches - 1] + tenorD;
 
-      const mkLegs = (S) => {
+      const mkLegs = (S, atVol) => {
+        // strikes are solved at the vol prevailing when the tranche is struck —
+        // pass the path vol (volReact) or the flat header vol
+        const pp = atVol == null ? p : Object.assign({}, p, { vol: atVol });
         const Kp = S * putPct;
         if (wings === 'plain') {
-          const Kc = CL.solveZeroCostCall(S, Kp, T0, p);
+          const Kc = CL.solveZeroCostCall(S, Kp, T0, pp);
           return [{ type: 'put', K: Kp, qty: 1 }, { type: 'call', K: Kc, qty: -1 }];
         }
         if (wings === 'ps') {
           const KpL = S * 0.78;
-          const Kc = CL.solveZeroCostCallPS(S, Kp, KpL, T0, p);
+          const Kc = CL.solveZeroCostCallPS(S, Kp, KpL, T0, pp);
           return [{ type: 'put', K: Kp, qty: 1 }, { type: 'put', K: KpL, qty: -1 }, { type: 'call', K: Kc, qty: -1 }];
         }
         // call-spread collar: short near call funds the put AND a long far call
         const KcH = S * 1.22;
         const pv = (type, K) => {
-          const sig = CL.volForStrike(K, S, T0, p.vol, p.rate, p.divy, p.skewOn, p.skew);
-          return CL.bs(type, S, K, T0, sig, p.rate, p.divy).price;
+          const sig = CL.volForStrike(K, S, T0, pp.vol, pp.rate, pp.divy, pp.skewOn, pp.skew);
+          return CL.bs(type, S, K, T0, sig, pp.rate, pp.divy).price;
         };
         const target = pv('put', Kp) + pv('call', KcH);
         let lo = S * 0.85, hi = KcH, Kc = null;
@@ -375,7 +382,7 @@ CL.tabs.campaign = {
           Kc = 0.5 * (lo + hi);
         }
         if (Kc == null) {   // far call unfundable — fall back to plain
-          const KcP = CL.solveZeroCostCall(S, Kp, T0, p);
+          const KcP = CL.solveZeroCostCall(S, Kp, T0, pp);
           return [{ type: 'put', K: Kp, qty: 1 }, { type: 'call', K: KcP, qty: -1 }];
         }
         return [{ type: 'put', K: Kp, qty: 1 }, { type: 'call', K: Kc, qty: -1 }, { type: 'call', K: KcH, qty: 1 }];
@@ -388,7 +395,11 @@ CL.tabs.campaign = {
 
       // ---------- walkthrough on scenario path ----------
       const path = CL.paths.scripted(scen, S0, horizon, { seed: 11, target: S0 * 1.08 });
-      const tranches = starts.map((t) => ({ t0: t, S: path[t], legs: mkLegs(path[t]), exp: t + tenorD }));
+      const ivW = volReact ? CL.paths.volPath(path, p.vol) : null;
+      const tranches = starts.map((t) => ({
+        t0: t, S: path[t], iv: ivW ? ivW[t] : p.vol,
+        legs: mkLegs(path[t], ivW ? ivW[t] : null), exp: t + tenorD,
+      }));
 
       const capOf = (tr) => tr.legs.find((l) => l.type === 'call').K;
       const floorOf = (tr) => tr.legs[0].K;
@@ -454,7 +465,12 @@ CL.tabs.campaign = {
         hover: false, legend: false,
       });
       ladderCard.append(el('p', 'caption',
-        'Tranche strikes: ' + tranches.map((tr, i) => 'T' + (i + 1) + ' ' + floorOf(tr).toFixed(0) + '/' + capOf(tr).toFixed(0)).join(' · ')));
+        'Tranche strikes' + (volReact ? ' (struck at that day\'s vol)' : '') + ': ' +
+        tranches.map((tr, i) => 'T' + (i + 1) + ' ' + floorOf(tr).toFixed(0) + '/' + capOf(tr).toFixed(0) +
+          (volReact ? ' @' + (tr.iv * 100).toFixed(0) + 'v' : '')).join(' · ') +
+        (volReact
+          ? '. Watch the cap-to-spot ratio shrink for tranches struck after a sell-off: high vol makes the put dear, so the zero-cost cap closes in — averaging into panic buys protection at its worst price.'
+          : '')));
 
       // aggregate delta chart
       greekCard.querySelectorAll('.chart-box, .caption').forEach((n) => n.remove());
@@ -495,11 +511,12 @@ CL.tabs.campaign = {
       const progPL = [], onePL = [], nakedPL = [];
       for (let mc = 0; mc < NP; mc++) {
         const mpath = CL.paths.gbm(S0, horizon, mu, p.vol, 1000 + mc + seedOff * 100000);
-        // program: tranches struck along the path
+        const mvol = volReact ? CL.paths.volPath(mpath, p.vol) : null;
+        // program: tranches struck along the path, priced at the vol of their strike day
         let pl = 0;
         for (const t0 of starts) {
           const St = mpath[t0], ST = mpath[t0 + tenorD];
-          const legs = mkLegs(St);
+          const legs = mkLegs(St, mvol ? mvol[t0] : null);
           pl += (ST - S0 + payoff(legs, ST)) * shTr;
         }
         progPL.push(pl - (deductImpact ? impactN : 0));
@@ -534,7 +551,11 @@ CL.tabs.campaign = {
           ? 'Impact deducted per the √N model: ' + F.big(impact1) + ' from one-shot, ' + F.big(impactN) + ' from the program (naked pays none — you already own the stock). '
           : 'Impact costs NOT deducted (tick the box in the controls) — they would take ~' + F.big(impact1) + ' from one-shot and ~' + F.big(impactN) + ' from the program. ') +
         'Why the program\'s median trails one-shot: a collar\'s payoff is concave (capped), and averaging entries across a drifting tape means some tranches spend their cap budget on levels the one-shot already locked in — the price of the fatter P95 and the thinner execution footprint. ' +
-        'The P1 column is where wings show up: with a put-spread trapdoor, the program\'s deep tail opens well below the plain collar\'s floor.</p>';
+        'The P1 column is where wings show up: with a put-spread trapdoor, the program\'s deep tail opens well below the plain collar\'s floor. ' +
+        (volReact
+          ? 'Tranche strikes are priced at each path\'s own vol: tranches struck after sell-offs face spiked vol and get meaner caps, which drags the program\'s left-centre down — untick the vol box to see the flat-vol fantasy version.'
+          : 'Vol-react is OFF: every tranche prices at ' + (p.vol * 100).toFixed(0) + ' vol regardless of what the path just did — flattering, and not how desks quote after a crash.') +
+        '</p>';
     }
 
     draw();
