@@ -1,4 +1,4 @@
-/* Tab 6 — Spreads as wings: put-spread collar and call-spread collar,
+/* Tab 5 — Spreads as wings: put-spread collar and call-spread collar,
    compared against the plain collar on payoff, cost and greeks.              */
 window.CL = window.CL || {};
 CL.tabs = CL.tabs || {};

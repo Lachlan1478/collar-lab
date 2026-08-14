@@ -1,4 +1,4 @@
-/* Tab 7 — Campaign Simulator: the full 30x ADV multi-tranche collar program.
+/* Tab 6 — Campaign Simulator: the full 30x ADV multi-tranche collar program.
    Scenario walkthrough (aggregate greeks + hedge flows) and Monte Carlo
    comparison vs one-shot collar and naked stock.                             */
 window.CL = window.CL || {};
@@ -56,7 +56,7 @@ CL.tabs.campaign = {
       onChange: (v) => { deductImpact = v; draw(); },
     }).root);
     controls.append(CL.ui.checkbox({
-      label: 'Price tranche strikes at path vol (post-crash protection is dear)', checked: true,
+      label: 'Vol AND skew react to the path when striking tranches', checked: true,
       onChange: (v) => { volReact = v; draw(); },
     }).root);
     const reseedBtn = el('button', 'btn ghost', 'Re-run — new seed');
@@ -353,9 +353,12 @@ CL.tabs.campaign = {
       const horizon = starts[nTranches - 1] + tenorD;
 
       const mkLegs = (S, atVol) => {
-        // strikes are solved at the vol prevailing when the tranche is struck —
-        // pass the path vol (volReact) or the flat header vol
-        const pp = atVol == null ? p : Object.assign({}, p, { vol: atVol });
+        // strikes are solved at the vol prevailing when the tranche is struck.
+        // Skew STEEPENS with vol (slope ∝ vol level) — the stylised fact that
+        // actually makes post-crash zero-cost caps meaner; a parallel vol move
+        // alone would widen them (the near-ATM call gains more than the 10%-OTM put).
+        const pp = atVol == null ? p
+          : Object.assign({}, p, { vol: atVol, skew: p.skew * (atVol / p.vol) });
         const Kp = S * putPct;
         if (wings === 'plain') {
           const Kc = CL.solveZeroCostCall(S, Kp, T0, pp);
@@ -394,7 +397,14 @@ CL.tabs.campaign = {
       };
 
       // ---------- walkthrough on scenario path ----------
-      const path = CL.paths.scripted(scen, S0, horizon, { seed: 11, target: S0 * 1.08 });
+      // for the crash story the gap must land MID-LADDER, so post-crash
+      // tranches actually exist (default scripted gap is at 60% of the path,
+      // long after the last tranche strikes)
+      const pathOpts = { seed: 11, target: S0 * 1.08 };
+      if (scen === 'crash' && nTranches >= 2) {
+        pathOpts.gapFrac = (starts[Math.floor((nTranches - 1) / 2)] + Math.max(2, spacing / 2)) / horizon;
+      }
+      const path = CL.paths.scripted(scen, S0, horizon, pathOpts);
       const ivW = volReact ? CL.paths.volPath(path, p.vol) : null;
       const tranches = starts.map((t) => ({
         t0: t, S: path[t], iv: ivW ? ivW[t] : p.vol,
@@ -414,7 +424,8 @@ CL.tabs.campaign = {
         for (const tr of tranches) {
           if (t < tr.t0 || t >= tr.exp) continue;
           const T = Math.max(0.002, (tr.exp - t) / 252);
-          d += CL.structGreeks(tr.legs, 0, path[t], T, p).delta * shTr;
+          const pd = ivW ? Object.assign({}, p, { vol: ivW[t] }) : p;   // mark at the day's vol
+          d += CL.structGreeks(tr.legs, 0, path[t], T, pd).delta * shTr;
         }
         days.push(t);
         cliDelta.push(d);           // client option delta (negative)
@@ -465,11 +476,13 @@ CL.tabs.campaign = {
         hover: false, legend: false,
       });
       ladderCard.append(el('p', 'caption',
-        'Tranche strikes' + (volReact ? ' (struck at that day\'s vol)' : '') + ': ' +
+        'Tranche strikes' + (volReact ? ' (struck at that day\'s vol & skew)' : '') + ': ' +
         tranches.map((tr, i) => 'T' + (i + 1) + ' ' + floorOf(tr).toFixed(0) + '/' + capOf(tr).toFixed(0) +
-          (volReact ? ' @' + (tr.iv * 100).toFixed(0) + 'v' : '')).join(' · ') +
+          (volReact ? ' @' + (tr.iv * 100).toFixed(0) + 'v (cap ' + (capOf(tr) / tr.S * 100).toFixed(1) + '%)' : '')).join(' · ') +
         (volReact
-          ? '. Watch the cap-to-spot ratio shrink for tranches struck after a sell-off: high vol makes the put dear, so the zero-cost cap closes in — averaging into panic buys protection at its worst price.'
+          ? (p.skewOn
+            ? '. Post-sell-off tranches price at spiked vol AND steeper skew — the 90% put richens against the call and the zero-cost cap-to-spot ratio closes in. Averaging into panic buys protection at its meanest. (Subtlety: the vol LEVEL alone would widen caps — the near-ATM call gains more than the 10%-OTM put; it is the skew steepening that turns the screw.)'
+            : '. NOTE: skew is OFF in the header, so only the vol level moves — and a parallel vol move actually WIDENS zero-cost caps (the near-ATM call gains more than the 10%-OTM put). Turn skew on to see the real post-crash dynamic: steepening skew richening the put and pulling the cap in.')
           : '')));
 
       // aggregate delta chart
@@ -553,8 +566,10 @@ CL.tabs.campaign = {
         'Why the program\'s median trails one-shot: a collar\'s payoff is concave (capped), and averaging entries across a drifting tape means some tranches spend their cap budget on levels the one-shot already locked in — the price of the fatter P95 and the thinner execution footprint. ' +
         'The P1 column is where wings show up: with a put-spread trapdoor, the program\'s deep tail opens well below the plain collar\'s floor. ' +
         (volReact
-          ? 'Tranche strikes are priced at each path\'s own vol: tranches struck after sell-offs face spiked vol and get meaner caps, which drags the program\'s left-centre down — untick the vol box to see the flat-vol fantasy version.'
-          : 'Vol-react is OFF: every tranche prices at ' + (p.vol * 100).toFixed(0) + ' vol regardless of what the path just did — flattering, and not how desks quote after a crash.') +
+          ? 'Tranche strikes are priced at each path\'s own vol with skew steepening in stress' +
+            (p.skewOn ? '' : ' (header skew is OFF, so only the level moves — which actually widens caps)') +
+            ': post-sell-off tranches buy protection at its meanest. Paths themselves stay constant-vol GBM — only the PRICING vol reacts. Untick the vol box to compare.'
+          : 'Vol-react is OFF: every tranche prices at ' + (p.vol * 100).toFixed(0) + ' vol and the day-0 skew regardless of what the path just did — not how desks quote after a crash.') +
         '</p>';
     }
 

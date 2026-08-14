@@ -400,13 +400,20 @@ CL.tabs.foundations = {
         for (let i = 0; i < xs.length; i++) { const d = Math.abs(xs[i] - v); if (d < bd) { bd = d; bi = i; } }
         return bi;
       };
-      const gapCap = mtmNow[idxAt(Kc)] - netPL[idxAt(Kc)];     // negative: holder short time value
-      const gapFloor = mtmNow[idxAt(Kp)] - netPL[idxAt(Kp)];   // positive: holder long time value
+      // decompose the gap into per-leg time values so the story is honest:
+      // the NET gap = call TV you are short − put TV you own
+      const tvAt = (x) => ({
+        c: CL.legGreeks({ type: 'call', K: Kc, qty: 1 }, x, T, p).price - Math.max(x - Kc, 0),
+        pt: CL.legGreeks({ type: 'put', K: Kp, qty: 1 }, x, T, p).price - Math.max(Kp - x, 0),
+      });
+      const atCap = tvAt(Kc), atFloor = tvAt(Kp);
       mtmCard.append(el('p', 'caption',
-        'Why "today" is worth LESS than "expiry" on the right side: at the cap you are SHORT the call\'s remaining time value — ' +
-        F.money(Math.abs(gapCap)) + '/share of premium the market still charges for the year of optionality you sold. ' +
-        'Unwind today and you pay it back; sit still and it decays INTO your pocket, melting the today line up into the expiry line. ' +
-        'At the floor it flips: the ' + F.money(Math.abs(gapFloor)) + ' gap is the put time value you OWN, and decay bleeds it away from you. ' +
+        'Why "today" is worth LESS than "expiry" on the right side: the gap is NET time value, and near the cap it runs against you. ' +
+        'At the cap you are short ' + F.money(atCap.c) + '/share of call time value and still own ' + F.money(atCap.pt) +
+        ' of put time value — net ' + F.money(atCap.c - atCap.pt) + ' the market holds over you. Unwind there and you pay the full ' +
+        F.money(atCap.c) + ' to buy the call back, recovering only ' + F.money(atCap.pt) + ' on the put; sit still and the NET decays into your pocket, ' +
+        'melting the today line up into the expiry line. At the floor it flips: put time value ' + F.money(atFloor.pt) + ' you own vs call time value ' +
+        F.money(atFloor.c) + ' you are short — net ' + F.money(atFloor.pt - atFloor.c) + ' of yours, bleeding away. ' +
         'Same position, two clocks — the gap is never free money, it is theta with a sign. All curves here are the holder\'s; the bank holds the mirror image of the option legs and hedges the delta (tab 3).'));
 
       // ---- skew panel ----

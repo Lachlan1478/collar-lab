@@ -1,4 +1,4 @@
-/* Tab 5 — Size & Impact: what changes at 30x ADV. Execution arithmetic,
+/* Tab 4 — Size & Impact: what changes at 30x ADV. Execution arithmetic,
    square-root impact, and gamma concentration vs tranche laddering.          */
 window.CL = window.CL || {};
 CL.tabs = CL.tabs || {};
@@ -45,7 +45,7 @@ CL.tabs.size = {
       '<b>Step 3 · the map:</b> where does the program\'s gamma pile up? ' +
       '<b>Step 4 · the chase:</b> what naked delta is the trader carrying while the hedge is still being worked? ' +
       '<b>Step 5 · the theatre:</b> watch the whole thing play out on the tape. ' +
-      'Every number recomputes from the four sliders above — push them to extremes and re-read the chain.'));
+      'Steps 1–3 recompute from all four sliders above; Step 4\'s chase is deliberately the ONE-SHOT order (size and participation only) — the tranche cure for it is chip 2 of the theatre.'));
 
     const tileHost = el('div');
     root.append(tileHost);
@@ -91,7 +91,7 @@ CL.tabs.size = {
       'print, the book\'s delta is <b>live</b> — and it moves with spot every day — but the trader can only trade the ' +
       'participation cap. Below: the hedge the book <b>needs</b> (terracotta, recomputed daily off the path) vs the hedge the ' +
       'trader actually <b>has</b> (navy, built at the cap). The vertical gap is naked delta — pure market risk the desk never wanted, ' +
-      'and the reason "slower is cheaper" has a limit.'));
+      'and the reason "slower is cheaper" has a limit. This is the ONE-SHOT chase, the worst case tranching exists to fix: cut it into N tranches and each chase is 1/N the size.'));
     let hedgeScen = 'crash';
     const chaseCtl = el('div', 'controls');
     chaseCtl.append(select({
@@ -175,7 +175,7 @@ CL.tabs.size = {
     });
 
     const scenarioDefs = [
-      { id: 'oneshot', label: 'One-shot · the 132-day order', make(c) {
+      { id: 'oneshot', label: 'One-shot · one heroic order', make(c) {
         const prog = 30 * c.ADV, hedge = c.dDelta * prog;
         const DAYS1 = Math.ceil(hedge / c.cap);
         const path = CL.paths.scripted('grind', c.S0, DAYS1, { seed: 5 });
@@ -223,7 +223,7 @@ CL.tabs.size = {
             { k: 'Risk-days accrued', v: RISK[st.t].toFixed(0), d: 'fully-unhedged-day equivalents' },
           ],
           milestones: [
-            { day: 0, title: '49.2M shares, one order', text:
+            { day: 0, title: 'The whole hedge, one order', text:
               'The client crosses ' + F.shares(prog) + ' shares (30× ADV) collared at floor ' + c.Kp.toFixed(0) +
               ' / cap ' + c.Kc.toFixed(2) + ' — all struck against today\'s ' + c.S0.toFixed(0) + '. Bank Δ +' +
               c.dDelta.toFixed(2) + ' means ' + F.shares(hedge) + ' shares to sell; at 15% of a ' + F.shares(c.ADV) +
@@ -317,7 +317,7 @@ CL.tabs.size = {
               work.toFixed(1) + ' days at 15% participation, inside a 2-week spacing with a day to spare. Floor ' +
               trs[0].Kp.toFixed(0) + ', cap ' + trs[0].Kc.toFixed(2) + ' — on one-sixth of the program only.' },
             { day: 9, title: 'Flat before the next lands', text:
-              'Tranche 1\'s hedge finished in 9 sessions and the tape never saw more than ' + F.shares(c.cap) +
+              'Tranche 1\'s hedge finished inside its window and the tape never saw more than ' + F.shares(c.cap) +
               ' shares a day. One quiet day, then tranche 2 strikes at whatever Monday prints.' },
             { day: 20, pause: true, title: 'The ladder appears', text:
               'Tranche 3 sets floor ' + trs[2].Kp.toFixed(1) + ' / cap ' + trs[2].Kc.toFixed(1) + ' — ' +
@@ -338,7 +338,7 @@ CL.tabs.size = {
               F.shares(30 * c.ADV) + ' one-shot. The client\'s average floor is ' +
               (trs.reduce((a, tr) => a + tr.Kp, 0) / 6).toFixed(1) + ', laddered up a rising tape.' },
             { day: DAYS, title: 'The machine, at the right size', text:
-              'Twelve weeks, no overlap, no fingerprint. But the client wanted 30×, not 12× — force this same ' +
+              'Every landing clean, no overlap, no fingerprint. But the client wanted 30×, not 12× — force this same ' +
               'schedule to carry 2.5× the size and it breaks. That is chip 3.' },
           ] };
       } },
@@ -583,9 +583,9 @@ CL.tabs.size = {
       const chaseDays = Math.min(252, Math.ceil(Math.abs(hedgeShares) / capSh) + 40);
       const cPath = CL.paths.scripted(hedgeScen, S0, chaseDays, { seed: 11, target: Kc0 });
       const cIv = CL.paths.volPath(cPath, p.vol);
-      const cx = [], tgt = [], act = [], slipArr = [];
+      const cx = [], tgt = [], act = [], slipArr = [], residArr = [];
       let H = 0, slip = 0, prevBook = dDelta * progShares, prevH = 0;
-      let peakResid = 0, peakResidDay = 0, flatDay = null;
+      let peakResid = 0, flatDay = null, maxWiden = 0, maxWidenDay = 0;
       for (let t = 0; t <= chaseDays; t++) {
         const T = Math.max(0.02, T0 - t / 252);
         const pv = Object.assign({}, p, { vol: cIv[t] });
@@ -594,16 +594,26 @@ CL.tabs.size = {
         const target = -bookSh;
         H += Math.max(-capSh, Math.min(capSh, target - H));
         const resid = bookSh + H;
-        if (Math.abs(resid) > peakResid) { peakResid = Math.abs(resid); peakResidDay = t; }
+        if (Math.abs(resid) > peakResid) peakResid = Math.abs(resid);
+        if (t > 0 && Math.abs(resid) - Math.abs(residArr[t - 1]) > maxWiden) {
+          maxWiden = Math.abs(resid) - Math.abs(residArr[t - 1]); maxWidenDay = t;
+        }
         if (flatDay == null && Math.abs(resid) < 0.02 * Math.abs(hedgeShares)) flatDay = t;
         prevBook = bookSh; prevH = H;
-        cx.push(t); tgt.push(target); act.push(H); slipArr.push(slip);
+        cx.push(t); tgt.push(target); act.push(H); slipArr.push(slip); residArr.push(resid);
+      }
+      // honesty check on "flat": count later days where the residual re-breaches
+      let rebreach = 0;
+      if (flatDay != null) {
+        for (let t = flatDay + 1; t <= chaseDays; t++) {
+          if (Math.abs(residArr[t]) >= 0.02 * Math.abs(hedgeShares)) rebreach++;
+        }
       }
 
       chaseTiles.innerHTML = '';
       chaseTiles.append(tiles([
-        { k: 'Peak naked delta', v: F.shares(peakResid) + ' sh', d: '≈ ' + F.big(peakResid * S0 * 0.01) + ' P&L per 1% move · day ' + peakResidDay },
-        { k: 'Days to effectively flat', v: flatDay == null ? '>' + chaseDays : '' + flatDay, d: 'residual < 2% of the order' },
+        { k: 'Peak naked delta', v: F.shares(peakResid) + ' sh', d: '≈ ' + F.big(peakResid * S0 * 0.01) + ' P&L per 1% move (day 0, by construction) · biggest later widening ' + F.shares(maxWiden) + ' sh on day ' + maxWidenDay },
+        { k: 'Days to first flat', v: flatDay == null ? '>' + chaseDays : '' + flatDay, d: 'residual < 2% of the order' + (rebreach > 0 ? ' — re-breached on ' + rebreach + ' later days (the target never stops moving)' : ' — and it stays flat') },
         { k: 'Slippage on this path', v: F.big(slipArr[chaseDays]), cls: slipArr[chaseDays] >= 0 ? 'pos' : 'neg', d: 'sign is luck — the size is the risk' },
         { k: 'Daily capacity', v: F.shares(capSh) + ' sh', d: (partRate * 100).toFixed(0) + '% of ' + F.shares(p.adv) + ' ADV' },
       ]));

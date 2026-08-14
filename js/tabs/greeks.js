@@ -494,12 +494,16 @@ CL.tabs.greeks = {
           return bi;
         };
         const thFloor = th.net[idxAt(Kp)], thCap = th.net[idxAt(Kc)];
+        const who = persp === 1 ? 'holder' : 'bank';
         cTheta.append(el('p', 'caption',
-          'How to read it: theta is the DAILY RENT, in A$ per share per day, and the sign is about ownership. ' +
-          'You BOUGHT the put — its time value is an asset melting on your desk, so at the floor net theta is ' + F.sign(thFloor, 3) +
-          '/day (you pay to keep the insurance alive). You SOLD the call — its melt is income, so at the cap it flips to ' + F.sign(thCap, 3) +
-          '/day in your favour. Hold this next to the gamma dumbbell above: same shape, opposite sign — theta is the invoice for gamma, ' +
-          'and nobody gets convexity rent-free.'));
+          'How to read it: theta is the DAILY RENT, in A$ per share per day, and its sign follows ownership — options you are long bleed, options you sold pay you. ' +
+          (persp === 1 ? 'The holder\'s book here is long the put, short the call: ' : 'The bank\'s book here is short the put, long the call: ') +
+          'net theta reads ' + F.sign(thFloor, 3) + '/day at the floor and ' + F.sign(thCap, 3) + '/day at the cap. ' +
+          (thFloor * thCap < 0
+            ? 'The sign flips across the range — decay bills the ' + who + ' at one strike and pays them at the other. '
+            : 'Note BOTH ends currently net ' + (thFloor < 0 ? 'against' : 'for') + ' the ' + who + ': with ' + Math.round(tLeft * 100) +
+              '% of life left, the 10%-OTM put leg\'s decay still dominates at either strike. Drag “Life remaining” down and watch the cap end change sign as the collar turns into a gamma trade. ') +
+          'Hold this against the gamma dumbbell above: same map, opposite sign — theta is the invoice for gamma, and nobody gets convexity rent-free.'));
       }
 
       mk(cVanna, 'Vanna (net)',
@@ -513,9 +517,11 @@ CL.tabs.greeks = {
         'ΔΔ / day ×100', { legend: false });
       cCharm.append(el('p', 'caption',
         'How to read it: charm is what delta does when NOTHING happens — spot parked, one day passes. ' +
-        'Park between the strikes and both options decay toward worthless, so the collar\'s grip loosens: your net delta drifts back ' +
-        'toward +1.0 all by itself, and you quietly re-become plain long stock. The bank feels the equal-and-opposite drift and must ' +
-        'unwind a slice of its hedge every day — mechanical flow that accelerates into expiry just off the strikes (the tall lobes here), ' +
+        'Park between the strikes and both options decay toward worthless, so the collar\'s grip loosens: ' +
+        (persp === 1 && stockQty
+          ? 'your net delta drifts back toward +1.0 all by itself, and you quietly re-become plain long stock. The bank feels the equal-and-opposite drift and must unwind a slice of its hedge every day'
+          : 'the option book\'s delta drifts toward zero all by itself, and the stock hedge held against it must be unwound a slice a day') +
+        ' — mechanical flow that accelerates into expiry just off the strikes (the tall lobes here), ' +
         'which is the engine behind expiry-week pinning on tab 3. The “Charm · delta bleeds away” chip above animates exactly this.'));
     }
 

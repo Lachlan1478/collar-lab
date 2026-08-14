@@ -1,4 +1,4 @@
-/* Tab 4 — The Bank's Book: the other side of the collar, delta-hedging
+/* Tab 3 — The Bank's Book: the other side of the collar, delta-hedging
    simulation, hedge flows, and hedging P&L vs realised vol.                  */
 window.CL = window.CL || {};
 CL.tabs = CL.tabs || {};
@@ -93,7 +93,7 @@ CL.tabs.dealer = {
       '<b>the night before ex-div</b> to capture the dividend. The desk rule: assignment happens when the dividend exceeds the ' +
       'call\'s remaining time value. The card below draws that line.'));
     const divCard = card('Early-exercise radar — when the short call gets called away',
-      'Call time value across spot at the ex-div moment vs the dividend. Wherever time value sits BELOW the dividend line, rational holders exercise — the collar\'s short call becomes a stock sale the night before ex-div.');
+      'Call time value across spot at the ex-div moment vs the dividend. Wherever the call is THROUGH the cap and its time value sits below the dividend line, rational holders exercise — the collar\'s short call becomes a stock sale the night before ex-div.');
     root.append(divCard);
 
     // ---- Scenario theatre ------------------------------------------------
@@ -570,12 +570,13 @@ CL.tabs.dealer = {
         'gamma/theta exchange: re-hedge less often (monthly) and the residual gets noisier, because unhedged gamma is a bet on every move. ' + skewEdge));
 
       // ---- restrike menu, bank side (salvaged & reframed from the old tab 3) ----
-      restrikeCard.querySelectorAll('.ctl, table, .caption').forEach((n) => n.remove());
-      let qDay = Math.round(days * 0.5);
+      // clear everything but the card's title/sub so redraws don't leak wrappers
+      restrikeCard.querySelectorAll(':scope > *:not(.chart-title):not(.chart-sub)').forEach((n) => n.remove());
+      let qDay = tab._qDay != null ? Math.min(tab._qDay, days - 5) : Math.round(days * 0.5);
       const quotesHost = el('div');
       const qSlider = slider({
         label: 'Quote day', min: 5, max: days - 5, step: 1, value: qDay,
-        fmt: (v) => 'day ' + v + '/' + days, onInput: (v) => { qDay = v; renderQuotes(); },
+        fmt: (v) => 'day ' + v + '/' + days, onInput: (v) => { qDay = v; tab._qDay = v; renderQuotes(); },
       });
       qSlider.root.style.maxWidth = '260px';
       restrikeCard.append(qSlider.root, quotesHost);
@@ -594,7 +595,7 @@ CL.tabs.dealer = {
         let html = '<table class="data"><tr><th>Client asks</th><th>Cash / share</th><th>Desk crosses (1M clip)</th><th>What changes</th></tr>';
         html += `<tr><td>Uncap — sell me back my call</td><td>client pays ${F.money(cNow.price)}</td><td>${fFlow(flowShares(-pNow.delta))}</td><td>upside reopens; desk keeps only the short put</td></tr>`;
         html += `<tr><td>Roll the cap up 5% (to ${F.money(capUp)})</td><td>client pays ${F.money(Math.max(0, cNow.price - cUp.price))}</td><td>${fFlow(flowShares(-pNow.delta + cUp.delta))}</td><td>cap moves ${F.money(capUp - Kc)} higher</td></tr>`;
-        html += `<tr><td>Full restrike — new 12m ${(putPct * 100).toFixed(0)}% zero-cost at today's spot</td><td>client ${pNow.price - cNow.price >= 0 ? 'receives' : 'pays'} ${F.money(Math.abs(pNow.price - cNow.price))} unwind</td><td>${fFlow(flowShares(-nP.delta + nC.delta))}</td><td>new floor ${F.money(newKp)} · new cap ${F.money(newKc)} (${(newKc / S * 100).toFixed(1)}%)</td></tr>`;
+        html += `<tr><td>Full restrike — new ${tenorM}m ${(putPct * 100).toFixed(0)}% zero-cost at today's spot</td><td>client ${pNow.price - cNow.price >= 0 ? 'receives' : 'pays'} ${F.money(Math.abs(pNow.price - cNow.price))} unwind</td><td>${fFlow(flowShares(-nP.delta + nC.delta))}</td><td>new floor ${F.money(newKp)} · new cap ${F.money(newKc)} (${(newKc / S * 100).toFixed(1)}%)</td></tr>`;
         html += '</table>';
         quotesHost.innerHTML = html;
         quotesHost.insertAdjacentHTML('beforeend',
@@ -605,17 +606,17 @@ CL.tabs.dealer = {
       renderQuotes();
 
       // ---- early-exercise radar: dividend vs call time value ----
-      divCard.querySelectorAll('.chart-box, .ctl, .tiles, .caption').forEach((n) => n.remove());
-      let divAmt = 2.40, exMonths = 3;
+      divCard.querySelectorAll(':scope > *:not(.chart-title):not(.chart-sub)').forEach((n) => n.remove());
+      let divAmt = tab._divAmt || 2.40, exMonths = tab._exMonths || 3;
       const divCtl = el('div');
       divCtl.style.display = 'flex'; divCtl.style.gap = '22px'; divCtl.style.flexWrap = 'wrap';
       const sDiv = slider({
         label: 'Dividend', min: 0.5, max: 4.0, step: 0.1, value: divAmt,
-        fmt: (v) => 'A$' + v.toFixed(2), onInput: (v) => { divAmt = v; renderDiv(); },
+        fmt: (v) => 'A$' + v.toFixed(2), onInput: (v) => { divAmt = v; tab._divAmt = v; renderDiv(); },
       });
       const sExT = slider({
         label: 'Life left at ex-div', min: 1, max: 12, step: 1, value: exMonths,
-        fmt: (v) => v + 'm', onInput: (v) => { exMonths = v; renderDiv(); },
+        fmt: (v) => v + 'm', onInput: (v) => { exMonths = v; tab._exMonths = v; renderDiv(); },
       });
       sDiv.root.style.maxWidth = '220px'; sExT.root.style.maxWidth = '220px';
       divCtl.append(sDiv.root, sExT.root);
@@ -630,7 +631,9 @@ CL.tabs.dealer = {
         for (let x = S0 * 0.95; x <= S0 * 1.35; x += S0 * 0.004) {
           const g = CL.legGreeks({ type: 'call', K: Kc, qty: 1 }, x, Tx, p);
           xs2.push(x);
-          tv.push(g.price - Math.max(x - Kc, 0));
+          // floor at 0: a listed call's time value can't be negative — the
+          // continuous-yield model drifts slightly negative deep ITM
+          tv.push(Math.max(0, g.price - Math.max(x - Kc, 0)));
         }
         // first spot (above the strike) where time value drops through the dividend
         let trigger = null;
@@ -662,7 +665,8 @@ CL.tabs.dealer = {
           (trigger
             ? 'Here, anywhere above ' + F.money(trigger) + ' the answer is yes — the holder\'s trader does the same maths and exercises. What the desk does about it: buy the call back, roll it up-and-out, or accept delivering stock and losing the franked dividend. '
             : 'At ' + exMonths + 'm of life the time value beats a ' + F.money(divAmt) + ' dividend at every spot shown — assignment risk is dormant until closer to expiry. ')
-          + 'Shorten "life left" and watch the safe zone collapse: deep-ITM calls with weeks to run and a fat dividend are near-certain assignments — the exact scenario the old expiry commentary warned about, now with the line drawn.'));
+          + 'Shorten "life left" and watch the safe zone collapse: deep-ITM calls with weeks to run and a fat dividend are near-certain assignments. ' +
+          'Model note: the remaining call is still priced with the continuous 4.5% yield running while the discrete dividend is drawn as the line, so the scan flags assignment a touch early — the right direction for a desk to be wrong in.'));
       };
       renderDiv();
     }

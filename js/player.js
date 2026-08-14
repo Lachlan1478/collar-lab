@@ -61,7 +61,7 @@ window.CL = window.CL || {};
     const btnPlay = el('button', 'btn', '▶ Play');
     const btnRestart = el('button', 'btn ghost', '↺');
     const speedSeg = CL.ui.segmented({
-      options: [{ id: '6', label: '1×' }, { id: '12', label: '2×' }, { id: '25', label: '4×' }],
+      options: [{ id: '6', label: '1×' }, { id: '12', label: '2×' }, { id: '24', label: '4×' }],
       value: '6', onChange: (v) => { speed = parseInt(v, 10); },
     });
     const scrub = el('input');
@@ -80,10 +80,10 @@ window.CL = window.CL || {};
     contBtn.style.display = 'none';
     narrate.append(phaseEl, pausedTag, textEl, contBtn);
     host.append(narrate);
-    function setPausedMoment(v) {
+    function setPausedMoment(v, withBtn) {
       narrate.classList.toggle('paused-moment', v);
       pausedTag.style.display = v ? 'inline-flex' : 'none';
-      contBtn.style.display = v ? 'inline-block' : 'none';
+      contBtn.style.display = (v && withBtn !== false) ? 'inline-block' : 'none';
     }
     contBtn.addEventListener('click', () => setPlaying(true));
     const msRow = el('div', 'milestone-row');
@@ -190,6 +190,7 @@ window.CL = window.CL || {};
 
     function checkMilestones(st) {
       const ms = cfg.milestones || [];
+      let snapped = null;
       for (let i = 0; i < ms.length; i++) {
         const m = ms[i];
         if (fired.has(i)) continue;
@@ -202,18 +203,28 @@ window.CL = window.CL || {};
         const stM = (m.day != null && st.t > m.day) ? stateAt(m.day) : st;
         phaseEl.textContent = m.title || '';
         textEl.innerHTML = typeof m.text === 'function' ? m.text(stM) : (m.text || '');
-        if (m.pause && playing) {
-          setPlaying(false);
-          setPausedMoment(true);
-          break;   // don't let a later milestone overwrite the pause lesson this frame
+        if (m.pause) {
+          if (playing) {
+            // snap the whole frame back to the milestone's nominal day, so the
+            // tiles/charts the narration points at show the day it teaches
+            if (m.day != null && st.t > m.day) { t = m.day; snapped = m.day; }
+            setPlaying(false);
+            setPausedMoment(true, true);
+            break;   // don't let a later milestone overwrite the pause lesson this frame
+          } else if (st.t >= days) {
+            setPausedMoment(true, false);   // expiry: highlight the moment, no Continue
+          }
         }
       }
+      return snapped;
     }
 
     function frame(st) {
       // milestones first: a pause here sets playing=false, which forces the
-      // tile/chart render below — narration and tiles stay in sync at pauses
-      checkMilestones(st);
+      // tile/chart render below — narration and tiles stay in sync at pauses.
+      // A day-based pause may snap t back to its nominal day; re-derive state.
+      const snapped = checkMilestones(st);
+      if (snapped != null) st = stateAt(snapped);
       if (ctx && cfg.custom) cfg.custom.frame(ctx, st);
       else if (ctx) ctx.frame(st);
       if (frameN % 3 === 0 || !playing) renderTiles(st);
@@ -274,6 +285,19 @@ window.CL = window.CL || {};
     scrub.addEventListener('input', () => {
       setPlaying(false); setPausedMoment(false);
       t = parseInt(scrub.value, 10);
+      // resync narration to the scrubbed day: day-based milestones up to t
+      // re-fire (latest wins), everything later resets so dots tell the truth
+      fired.clear();
+      msDots.forEach((d) => d.classList.remove('hit'));
+      phaseEl.textContent = ''; textEl.innerHTML = '';
+      (cfg.milestones || []).forEach((m, i) => {
+        if (m.day == null || m.day > t) return;
+        fired.add(i);
+        msDots[i] && msDots[i].classList.add('hit');
+        const stM = stateAt(m.day);
+        phaseEl.textContent = m.title || '';
+        textEl.innerHTML = typeof m.text === 'function' ? m.text(stM) : (m.text || '');
+      });
       frame(stateAt(t));
     });
 

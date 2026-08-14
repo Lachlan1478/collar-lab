@@ -52,9 +52,11 @@ window.CL = window.CL || {};
         case 'selloff':   drift = -0.30; sig = 0.22; break;
         case 'crash': {
           drift = 0.05; sig = 0.13;
-          // one-day gap ~60% through, weak dead-cat bounce, ends below the floor
-          if (i === Math.round(days * 0.6)) { S *= 0.83; }
-          if (f > 0.6) { drift = -8.0 * Math.log(S / (S0 * 0.86)); sig = 0.22; }
+          // one-day gap (default ~60% through; opts.gapFrac repositions it),
+          // weak dead-cat bounce, ends below the floor
+          const gf = opts.gapFrac == null ? 0.6 : opts.gapFrac;
+          if (i === Math.round(days * gf)) { S *= 0.83; }
+          if (f > gf) { drift = -8.0 * Math.log(S / (S0 * 0.86)); sig = 0.22; }
           break;
         }
         case 'pin': {
