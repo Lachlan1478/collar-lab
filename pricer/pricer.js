@@ -454,7 +454,7 @@
       return row;
     };
     outTiles.append(buildRow(tileDefs));
-    outTiles.append(el('p', 'trace-sec', 'Greeks — bank book, per the blotter directions, at inception'));
+    outTiles.append(el('p', 'trace-sec', 'Greeks — bank\'s book at inception, signed by each leg\'s Buy/Sell direction (Sell = bank short the option → greeks negative)'));
     outTiles.append(buildRow(greekDefs));
     renderTrace(activeTrace, traces);
   }
