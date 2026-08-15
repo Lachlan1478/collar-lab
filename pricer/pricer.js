@@ -69,7 +69,7 @@
   // ---------- layout ----------
   const app = document.getElementById('app');
 
-  const mktCard = card('Market data', 'Spot, 90-day ADV and 90-day realised SD, as of the start date.');
+  const mktCard = card('Market data');
   const mktInputs = el('div', 'mkt-inputs');
   const field = (label, id, type, value, step) => {
     const f = el('div', 'field');
@@ -92,8 +92,7 @@
   mktCard.append(mktTiles, mktErr);
   app.append(mktCard);
 
-  const structCard = card('Structure = Σ option legs',
-    'Bank direction is the desk\'s side: Sell = the bank writes the option to the client (collects premium). Premium is per share; leg premium is the bank\'s cashflow.');
+  const structCard = card('Structure = Σ option legs');
   const legsHost = el('div');
   structCard.append(legsHost);
   const btnRow = el('div');
@@ -104,8 +103,7 @@
   structCard.append(btnRow);
   app.append(structCard);
 
-  const outCard = card('Outputs — click any tile to trace the math',
-    'Lending is sized on the put legs (the floor the bank lends against). Every number below can be opened up: components, formulas, per-leg arithmetic.');
+  const outCard = card('Outputs');
   const outTiles = el('div');
   const traceHost = el('div');
   outCard.append(outTiles, traceHost);
@@ -119,10 +117,10 @@
       return;
     }
     mktTiles.append(CL.ui.tiles([
-      { k: mkt.symbol + ' spot', v: money(mkt.spot), d: mkt.name + ' · close ' + mkt.asof },
-      { k: '90d ADV', v: CL.fmt.shares(mkt.adv90) + ' sh', d: '≈ ' + big(mkt.adv90 * mkt.spot) + '/day' },
-      { k: '90d SD (annualised)', v: (mkt.sd90 * 100).toFixed(1) + '%', d: 'pricing vol — flat, no smile' },
-      { k: 'Rates used', v: mkt.rate.toFixed(2) + '% / ' + mkt.divy.toFixed(2) + '%', d: 'funding / dividend yield' },
+      { k: mkt.symbol + ' spot · ' + mkt.asof, v: money(mkt.spot) },
+      { k: '90d ADV', v: CL.fmt.shares(mkt.adv90) + ' sh' },
+      { k: '90d SD (annualised)', v: (mkt.sd90 * 100).toFixed(1) + '%' },
+      { k: 'Rates (fund / div)', v: mkt.rate.toFixed(2) + '% / ' + mkt.divy.toFixed(2) + '%' },
     ]));
   }
 
@@ -444,7 +442,6 @@
         tile.dataset.key = td.key;
         tile.append(el('div', 'k', td.k));
         tile.append(el('div', 'v' + (td.cls ? ' ' + td.cls : ''), td.v));
-        tile.append(el('div', 'd', td.d + ' · <u>trace ⌕</u>'));
         tile.addEventListener('click', () => {
           activeTrace = activeTrace === td.key ? null : td.key;
           recompute();
@@ -454,7 +451,7 @@
       return row;
     };
     outTiles.append(buildRow(tileDefs));
-    outTiles.append(el('p', 'trace-sec', 'Greeks — bank\'s book at inception, signed by each leg\'s Buy/Sell direction (Sell = bank short the option → greeks negative)'));
+    outTiles.append(el('p', 'trace-sec', 'Greeks — bank\'s book'));
     outTiles.append(buildRow(greekDefs));
     renderTrace(activeTrace, traces);
   }
